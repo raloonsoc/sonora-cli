@@ -2,8 +2,10 @@ package artwork
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/color"
+	"strings"
 	"testing"
 )
 
@@ -81,6 +83,41 @@ func TestTargetRows_zeroWidthImageFallsBackToCols(t *testing.T) {
 	empty := image.NewRGBA(image.Rect(0, 0, 0, 0))
 	if got := targetRows(empty, 20); got != 20 {
 		t.Errorf("targetRows(empty, 20) = %d, want 20", got)
+	}
+}
+
+func TestRender_kitty_deletesPlacementBeforeRetransmitting(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Render(&buf, solidImage(color.RGBA{R: 100, A: 255}), TermKitty, ModeAuto, 10); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	out := buf.String()
+
+	wantDelete := fmt.Sprintf("a=d,d=i,i=%d,p=%d", kittyImageID, kittyPlacementID)
+	if !strings.Contains(out, wantDelete) {
+		t.Errorf("output missing delete command %q; without it, repeated renders (every position tick) stack images instead of replacing them", wantDelete)
+	}
+
+	wantTransmit := fmt.Sprintf("i=%d", kittyImageID)
+	if !strings.Contains(out, wantTransmit) {
+		t.Errorf("output missing stable image id %q in the transmit command", wantTransmit)
+	}
+}
+
+func TestRender_kitty_sameIDAcrossCalls(t *testing.T) {
+	img := solidImage(color.RGBA{G: 100, A: 255})
+
+	var first, second bytes.Buffer
+	if err := Render(&first, img, TermKitty, ModeAuto, 10); err != nil {
+		t.Fatalf("Render (first): %v", err)
+	}
+	if err := Render(&second, img, TermKitty, ModeAuto, 12); err != nil {
+		t.Fatalf("Render (second, different size): %v", err)
+	}
+
+	idTag := fmt.Sprintf("i=%d", kittyImageID)
+	if !strings.Contains(first.String(), idTag) || !strings.Contains(second.String(), idTag) {
+		t.Error("both renders must target the same Kitty image id regardless of requested size, or the terminal treats them as unrelated images")
 	}
 }
 

@@ -46,7 +46,24 @@ func Render(out io.Writer, img image.Image, term TermType, mode Mode, cols int) 
 
 	switch term {
 	case TermKitty:
-		opts := rasterm.KittyImgOpts{DstCols: uint32(cols), DstRows: uint32(rows)}
+		// A stable ImageId/PlacementId, not just DstCols/DstRows, is what
+		// makes re-sending the same cover art on every Bubble Tea repaint
+		// (every ~500ms position tick, not just on track change) update
+		// the existing placement in place. Without one, Kitty treats each
+		// transmission as a brand new image and stacks them instead of
+		// replacing — the "printing a new bar every tick" bug. The delete
+		// command clears that placement first so a resized re-render (a
+		// different cols/rows for the same id) doesn't leave a stale
+		// larger/smaller ghost behind it.
+		if err := kittyDeletePlacement(out); err != nil {
+			return fmt.Errorf("artwork: kitty clear placement: %w", err)
+		}
+		opts := rasterm.KittyImgOpts{
+			DstCols:     uint32(cols),
+			DstRows:     uint32(rows),
+			ImageId:     kittyImageID,
+			PlacementId: kittyPlacementID,
+		}
 		if err := rasterm.KittyWriteImage(out, img, opts); err != nil {
 			return fmt.Errorf("artwork: kitty render: %w", err)
 		}
@@ -80,6 +97,26 @@ func Render(out io.Writer, img image.Image, term TermType, mode Mode, cols int) 
 // defaultCols is used when a caller doesn't have a layout-derived width yet
 // (e.g. before the first WindowSizeMsg).
 const defaultCols = 30
+
+// kittyImageID/kittyPlacementID are fixed, sonora-cli-specific Kitty
+// graphics protocol identifiers. sonora-cli only ever shows one piece of
+// cover art on screen at a time, so a single hardcoded pair (rather than
+// generating fresh ones per track) is enough to keep every re-render
+// targeting the same placement.
+const (
+	kittyImageID     = 0x736f6e72 // "sonr" packed into 4 bytes, arbitrary but stable
+	kittyPlacementID = 1
+)
+
+// kittyDeletePlacement clears kittyPlacementID's prior contents (Kitty
+// graphics protocol "delete" action, d=i deletes by image id) before a new
+// image is transmitted to it, so a size change on the same id doesn't
+// leave the old placement's pixels showing around the new one.
+func kittyDeletePlacement(out io.Writer) error {
+	_, err := fmt.Fprintf(out, "%sa=d,d=i,i=%d,p=%d%s",
+		rasterm.KITTY_IMG_HDR, kittyImageID, kittyPlacementID, rasterm.KITTY_IMG_FTR)
+	return err
+}
 
 // sixelPxPerCol/sixelPxPerRow are a rough cell-to-pixel conversion for
 // Sixel, which has no notion of "display in N columns" the way Kitty/iTerm2
