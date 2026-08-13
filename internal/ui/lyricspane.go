@@ -54,22 +54,21 @@ func loadLyrics(client *subsonic.Client, current lyricsState, song subsonic.Song
 	}
 }
 
-var (
-	lyricLineStyle       = lipgloss.NewStyle().Faint(true)
-	lyricActiveLineStyle = lipgloss.NewStyle().Bold(true)
-)
+var lyricLineStyle = lipgloss.NewStyle().Faint(true)
 
-// View renders a fixed-height window of lines centered on the active line.
-// Unsynced lyrics render as a static pane with no highlight; no lyrics
-// renders nothing at all, so the pane disappears rather than showing an
-// empty box (SPECS §8).
-func (s lyricsState) View(positionMS int) string {
+// View renders a fixed-height window of lines centered on the active line,
+// highlighted in accent (SPECS §7: applied to the now-playing border, the
+// progress-bar fill, and the active lyric line). Unsynced lyrics render as
+// a static pane with no highlight; no lyrics renders nothing at all, so
+// the pane disappears rather than showing an empty box (SPECS §8).
+func (s lyricsState) View(positionMS int, accent lipgloss.Color) string {
 	if len(s.l.Lines) == 0 {
 		return ""
 	}
 
 	active := lyrics.ActiveLine(s.l, positionMS)
 	start, end := windowAround(active, len(s.l.Lines), lyricsPaneVisibleLines)
+	activeLineStyle := lipgloss.NewStyle().Bold(true).Foreground(accent)
 
 	var out string
 	for i := start; i < end; i++ {
@@ -78,7 +77,7 @@ func (s lyricsState) View(positionMS int) string {
 			line = " "
 		}
 		if i == active {
-			out += lyricActiveLineStyle.Render(line) + "\n"
+			out += activeLineStyle.Render(line) + "\n"
 		} else {
 			out += lyricLineStyle.Render(line) + "\n"
 		}

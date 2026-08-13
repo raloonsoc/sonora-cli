@@ -82,6 +82,7 @@ type nowPlayingModel struct {
 	lyricsShown bool
 
 	scrobble scrobbleState
+	accent   accentState
 
 	err error
 }
@@ -104,6 +105,7 @@ func newNowPlayingModel(client *subsonic.Client, ctrl *player.Controller, initia
 		artTerm:     term,
 		artMode:     mode,
 		lyricsShown: lyricsEnabled,
+		accent:      accentState{color: defaultAccent},
 	}
 }
 
@@ -200,11 +202,19 @@ func (m nowPlayingModel) Update(msg tea.Msg) (nowPlayingModel, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
+		if cmd := loadAccent(m.client, m.accent, msg.song.AlbumID); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		cmds = append(cmds, scrobbleCmd(m.client, msg.song.ID, false)) // now-playing ping
 		return m, tea.Batch(cmds...)
 
 	case artLoadedMsg:
 		m.art = artworkState(msg)
+		return m, nil
+
+	case accentLoadedMsg:
+		m.accent = accentState(msg)
+		m.progress = progress.New(progress.WithSolidFill(string(m.accent.color)))
 		return m, nil
 
 	case lyricsLoadedMsg:
@@ -370,12 +380,13 @@ func (m nowPlayingModel) View() string {
 	}
 
 	if m.lyricsShown {
-		if lv := m.lyrics.View(int(m.position.Milliseconds())); lv != "" {
+		if lv := m.lyrics.View(int(m.position.Milliseconds()), m.accent.color); lv != "" {
 			body += "\n" + lv
 		}
 	}
 
-	return borderStyle.Render(body)
+	accentBorder := borderStyle.BorderForeground(m.accent.color)
+	return accentBorder.Render(body)
 }
 
 func formatDuration(d time.Duration) string {

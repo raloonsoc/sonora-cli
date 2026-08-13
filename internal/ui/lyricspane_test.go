@@ -28,7 +28,7 @@ func TestWindowAround(t *testing.T) {
 
 func TestLyricsState_View_emptyWhenNoLines(t *testing.T) {
 	s := lyricsState{}
-	if got := s.View(1000); got != "" {
+	if got := s.View(1000, defaultAccent); got != "" {
 		t.Errorf("View() = %q, want empty for no lyrics", got)
 	}
 }
