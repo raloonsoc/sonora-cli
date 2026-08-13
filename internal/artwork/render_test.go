@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"image"
 	"image/color"
+	"strings"
 	"testing"
 )
 
@@ -17,34 +18,46 @@ func solidImage(c color.Color) image.Image {
 	return img
 }
 
-func TestRender_asciiFallback(t *testing.T) {
+func TestRender_halfBlockOutput(t *testing.T) {
 	var buf bytes.Buffer
 	err := Render(&buf, solidImage(color.RGBA{R: 200, G: 50, B: 50, A: 255}), TermUnknown, ModeAuto, 20)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	if buf.Len() == 0 {
-		t.Error("expected non-empty ASCII output")
+	out := buf.String()
+	if out == "" {
+		t.Fatal("expected non-empty output")
+	}
+	if !strings.Contains(out, halfBlock) {
+		t.Errorf("output missing half-block character %q", halfBlock)
+	}
+	if !strings.Contains(out, "\x1b[38;2;") {
+		t.Error("output missing a 24-bit truecolor foreground escape (\\x1b[38;2;...)")
+	}
+	if !strings.Contains(out, "\x1b[48;2;") {
+		t.Error("output missing a 24-bit truecolor background escape (\\x1b[48;2;...)")
 	}
 }
 
-func TestRender_forcedASCIIIgnoresTermType(t *testing.T) {
+func TestRender_lineCountMatchesRows(t *testing.T) {
 	var buf bytes.Buffer
-	err := Render(&buf, solidImage(color.White), TermKitty, ModeASCII, 20)
-	if err != nil {
+	img := solidImage(color.White)
+	if err := Render(&buf, img, TermUnknown, ModeAuto, 20); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	if buf.Len() == 0 {
-		t.Error("expected non-empty ASCII output even with a Kitty-capable term")
+	wantRows := targetRows(img, 20)
+	gotLines := strings.Count(buf.String(), "\n") + 1
+	if gotLines != wantRows {
+		t.Errorf("output has %d lines, want %d (targetRows)", gotLines, wantRows)
 	}
 }
 
-// TestRender_alwaysASCIIRegardlessOfTermType locks in that native graphics
+// TestRender_alwaysBlocksRegardlessOfTermType locks in that native graphics
 // protocols are gone: every TermType must produce identical, plain-text
-// ASCII output. Native protocols (Kitty in particular) were removed after
-// proving unreliable in a TUI that repaints its whole frame on every
+// half-block output. Native protocols (Kitty in particular) were removed
+// after proving unreliable in a TUI that repaints its whole frame on every
 // ~500ms position tick — see the comment on Render.
-func TestRender_alwaysASCIIRegardlessOfTermType(t *testing.T) {
+func TestRender_alwaysBlocksRegardlessOfTermType(t *testing.T) {
 	img := solidImage(color.RGBA{B: 200, A: 255})
 
 	var kittyOut, iterm2Out, sixelOut, unknownOut bytes.Buffer
@@ -114,5 +127,13 @@ func TestTargetRows_zeroWidthImageFallsBackToCols(t *testing.T) {
 	empty := image.NewRGBA(image.Rect(0, 0, 0, 0))
 	if got := targetRows(empty, 20); got != 20 {
 		t.Errorf("targetRows(empty, 20) = %d, want 20", got)
+	}
+}
+
+func TestSampleRGB_clampsYToBounds(t *testing.T) {
+	img := solidImage(color.RGBA{R: 10, G: 20, B: 30, A: 255})
+	r, g, b := sampleRGB(img, 0, 999) // past the image's bottom edge
+	if r != 10 || g != 20 || b != 30 {
+		t.Errorf("sampleRGB out-of-bounds = (%d,%d,%d), want (10,20,30) from the clamped row", r, g, b)
 	}
 }

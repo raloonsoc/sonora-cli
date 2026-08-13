@@ -29,9 +29,10 @@ large synced lyrics.
 - **Works with any OpenSubsonic server.** Built against the standard contract,
   so it talks to Sonora, Navidrome, Airsonic, and anything else that speaks
   the protocol.
-- **Cover art in the terminal.** Rendered as colored ASCII art, chosen over
-  native graphics protocols (Kitty/iTerm2/Sixel) after they proved unreliable
-  in a TUI that repaints its whole frame on every playback tick — see
+- **Cover art in the terminal.** Rendered as truecolor half-block art (two
+  pixel rows per terminal cell), chosen over native graphics protocols
+  (Kitty/iTerm2/Sixel) after they proved unreliable in a TUI that repaints
+  its whole frame on every playback tick — see
   [Terminal support](#terminal-support).
 - **Synced lyrics.** Millisecond-timestamped lines that follow along with
   playback, with the active line highlighted.
@@ -196,8 +197,10 @@ These work everywhere — browsing the library, or inside the lyrics view.
 
 ## Terminal support
 
-Cover art renders as colored ASCII art everywhere — any 16-color-or-better
-terminal works, no graphics-protocol support required.
+Cover art renders as truecolor half-block characters (`▀`, foreground and
+background set independently per cell) everywhere — any truecolor terminal
+works, no graphics-protocol support required. Downgrades automatically on
+terminals without truecolor.
 
 Native graphics protocols (Kitty, iTerm2 inline images, Sixel) were tried
 early on but pulled: they place images as state that persists outside the
@@ -205,11 +208,11 @@ normal text grid, separate from whatever the TUI's renderer believes is on
 screen. Repainting the whole frame on every ~500ms playback tick — which
 sonora-cli does, to drive the progress bar and lyrics highlight — desynced
 the two, causing the previous placement to linger undeleted instead of the
-new one replacing it in place. ASCII has no such out-of-band state, so it
-repaints exactly as reliably as the rest of the UI.
+new one replacing it in place. Block characters have no such out-of-band
+state, so they repaint exactly as reliably as the rest of the UI.
 
 `art = "auto" | "ascii" | "off"` in `[ui]` toggles art on/off; both non-"off"
-values currently render the same ASCII output.
+values currently render the same block output.
 
 ## Accent color
 
