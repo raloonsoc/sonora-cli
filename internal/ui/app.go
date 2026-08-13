@@ -31,6 +31,7 @@ type App struct {
 
 	library    libraryModel
 	nowPlaying nowPlayingModel
+	search     searchModel
 	help       help.Model
 	keys       KeyMap
 
@@ -66,6 +67,7 @@ func New(client *subsonic.Client, ctrl *player.Controller, opts Options) App {
 		ctrl:       ctrl,
 		library:    newLibraryModel(client),
 		nowPlaying: newNowPlayingModel(client, ctrl, opts.InitialVolume, opts.Term, opts.ArtMode, opts.LyricsEnabled),
+		search:     newSearchModel(client),
 		help:       help.New(),
 		keys:       DefaultKeyMap(),
 		focus:      paneLibrary,
@@ -101,6 +103,15 @@ func (m App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 
 	case tea.KeyMsg:
+		// While search is active, every key goes to its text input first —
+		// including letters that double as global bindings (q, ?, tab) —
+		// so typing "quit" into the search box doesn't quit the app.
+		if m.search.active {
+			var cmd tea.Cmd
+			m.search, cmd = m.search.Update(msg)
+			return m, cmd
+		}
+
 		switch {
 		case key.Matches(msg, m.keys.Quit):
 			if m.cancelPos != nil {
@@ -113,7 +124,15 @@ func (m App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Tab):
 			m.focus = togglePane(m.focus)
 			return m, nil
+		case key.Matches(msg, m.keys.Search):
+			m.search = m.search.Open()
+			return m, nil
 		}
+
+	case searchTickMsg, searchResultMsg:
+		var cmd tea.Cmd
+		m.search, cmd = m.search.Update(msg)
+		return m, cmd
 	}
 
 	var cmds []tea.Cmd
@@ -151,6 +170,10 @@ func togglePane(p pane) pane {
 }
 
 func (m App) View() string {
+	if m.search.active {
+		return m.search.View()
+	}
+
 	view := m.library.View() + "\n\n" + m.nowPlaying.View()
 	if m.showHelp {
 		view += "\n\n" + m.help.View(m.keys)

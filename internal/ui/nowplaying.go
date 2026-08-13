@@ -81,6 +81,8 @@ type nowPlayingModel struct {
 	lyrics      lyricsState
 	lyricsShown bool
 
+	scrobble scrobbleState
+
 	err error
 }
 
@@ -188,6 +190,7 @@ func (m nowPlayingModel) Update(msg tea.Msg) (nowPlayingModel, tea.Cmd) {
 	case trackStartedMsg:
 		m.duration = time.Duration(msg.song.Duration) * time.Second
 		m.err = nil
+		m.scrobble = scrobbleState{songID: msg.song.ID}
 		var cmds []tea.Cmd
 		if cmd := m.loadArt(coverArtKey(msg.song)); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -197,6 +200,7 @@ func (m nowPlayingModel) Update(msg tea.Msg) (nowPlayingModel, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
+		cmds = append(cmds, scrobbleCmd(m.client, msg.song.ID, false)) // now-playing ping
 		return m, tea.Batch(cmds...)
 
 	case artLoadedMsg:
@@ -217,10 +221,18 @@ func (m nowPlayingModel) Update(msg tea.Msg) (nowPlayingModel, tea.Cmd) {
 			return m, nil
 		}
 		m.position = time.Duration(msg.Position * float64(time.Second))
-		if msg.Idle {
-			return m.advanceQueue()
+
+		var cmd tea.Cmd
+		if !m.scrobble.submitted && m.scrobble.songID != "" && shouldSubmit(m.position, m.duration) {
+			m.scrobble.submitted = true
+			cmd = scrobbleCmd(m.client, m.scrobble.songID, true)
 		}
-		return m, nil
+
+		if msg.Idle {
+			mNext, nextCmd := m.advanceQueue()
+			return mNext, tea.Batch(cmd, nextCmd)
+		}
+		return m, cmd
 
 	case tea.KeyMsg:
 		keys := DefaultKeyMap()
