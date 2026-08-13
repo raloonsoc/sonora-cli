@@ -61,6 +61,8 @@ func Load(path, profile string) (*Config, error) {
 
 	cfg := &Config{
 		Profiles: map[string]Profile{},
+		UI:       UI{Art: "auto", Lyrics: true},
+		Playback: Playback{Volume: 80},
 		path:     path,
 	}
 
@@ -96,4 +98,22 @@ func (c *Config) Save() error {
 func (c *Config) ActiveProfile() (Profile, bool) {
 	p, ok := c.Profiles[c.DefaultProfile]
 	return p, ok
+}
+
+// IsFirstRun reports whether no profile has been configured yet, meaning
+// the caller should run the first-run prompt flow.
+func (c *Config) IsFirstRun() bool {
+	return len(c.Profiles) == 0
+}
+
+// AddProfile adds or replaces profile under name and, if it's the first
+// profile in the config, makes it the default.
+func (c *Config) AddProfile(name string, p Profile) {
+	if c.Profiles == nil {
+		c.Profiles = map[string]Profile{}
+	}
+	c.Profiles[name] = p
+	if c.DefaultProfile == "" {
+		c.DefaultProfile = name
+	}
 }
