@@ -78,6 +78,9 @@ type nowPlayingModel struct {
 	artTerm  artwork.TermType
 	artMode  artwork.Mode
 
+	lyrics      lyricsState
+	lyricsShown bool
+
 	err error
 }
 
@@ -89,15 +92,16 @@ type artworkState struct {
 	rendered string
 }
 
-func newNowPlayingModel(client *subsonic.Client, ctrl *player.Controller, initialVolume int, term artwork.TermType, mode artwork.Mode) nowPlayingModel {
+func newNowPlayingModel(client *subsonic.Client, ctrl *player.Controller, initialVolume int, term artwork.TermType, mode artwork.Mode, lyricsEnabled bool) nowPlayingModel {
 	return nowPlayingModel{
-		client:   client,
-		ctrl:     ctrl,
-		progress: progress.New(progress.WithDefaultGradient()),
-		volume:   initialVolume,
-		artCache: artwork.NewCache(0),
-		artTerm:  term,
-		artMode:  mode,
+		client:      client,
+		ctrl:        ctrl,
+		progress:    progress.New(progress.WithDefaultGradient()),
+		volume:      initialVolume,
+		artCache:    artwork.NewCache(0),
+		artTerm:     term,
+		artMode:     mode,
+		lyricsShown: lyricsEnabled,
 	}
 }
 
@@ -184,10 +188,23 @@ func (m nowPlayingModel) Update(msg tea.Msg) (nowPlayingModel, tea.Cmd) {
 	case trackStartedMsg:
 		m.duration = time.Duration(msg.song.Duration) * time.Second
 		m.err = nil
-		return m, m.loadArt(coverArtKey(msg.song))
+		var cmds []tea.Cmd
+		if cmd := m.loadArt(coverArtKey(msg.song)); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if m.lyricsShown {
+			if cmd := loadLyrics(m.client, m.lyrics, msg.song); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+		return m, tea.Batch(cmds...)
 
 	case artLoadedMsg:
 		m.art = artworkState(msg)
+		return m, nil
+
+	case lyricsLoadedMsg:
+		m.lyrics = lyricsState(msg)
 		return m, nil
 
 	case playErrMsg:
@@ -338,6 +355,12 @@ func (m nowPlayingModel) View() string {
 
 	if m.art.rendered != "" {
 		body = m.art.rendered + "\n" + body
+	}
+
+	if m.lyricsShown {
+		if lv := m.lyrics.View(int(m.position.Milliseconds())); lv != "" {
+			body += "\n" + lv
+		}
 	}
 
 	return borderStyle.Render(body)

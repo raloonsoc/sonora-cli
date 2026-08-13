@@ -75,8 +75,12 @@ func run() error {
 		return fmt.Errorf("set initial volume: %w", err)
 	}
 
-	term := artwork.DetectTermType() // once at startup; cached for the session (SPECS §6.1)
-	app := ui.New(client, ctrl, cfg.Playback.Volume, term, artwork.Mode(cfg.UI.Art))
+	app := ui.New(client, ctrl, ui.Options{
+		InitialVolume: cfg.Playback.Volume,
+		Term:          artwork.DetectTermType(),
+		ArtMode:       artwork.Mode(cfg.UI.Art),
+		LyricsEnabled: cfg.UI.Lyrics,
+	})
 	p := tea.NewProgram(app)
 
 	// SIGINT/SIGTERM: quit the Bubble Tea program so the deferred
