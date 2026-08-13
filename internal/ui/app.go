@@ -15,17 +15,20 @@ import (
 	"github.com/raloonsoc/sonora-cli/internal/subsonic"
 )
 
-// pane is which half of the split view has focus; tab cycles between them.
-type pane int
-
-const (
-	paneLibrary pane = iota
-	paneNowPlaying
-)
+// barHeight is the fixed height of the bottom now-playing bar, including
+// its border — the library pane gets whatever's left above it.
+const barHeight = 5
 
 // App is the root Bubble Tea model: view switching, window-resize handling,
 // and global quit. Dependencies are constructed by the caller and passed
 // in, never reached for globally (CODESTYLE §5).
+//
+// Layout is a full-width library pane with a fixed-height now-playing bar
+// docked at the bottom (desktop-Spotify style), or — while nowPlaying is in
+// "Spotify mode" (see nowPlayingModel.fullscreen, toggled by the L key) —
+// nowPlaying alone fills the screen. The library list always owns keyboard
+// focus otherwise; transport controls (space, n/p, seek, volume) work
+// globally regardless, so there's no pane-to-pane focus to cycle through.
 type App struct {
 	client *subsonic.Client
 	ctrl   *player.Controller
@@ -37,7 +40,6 @@ type App struct {
 	help          help.Model
 	keys          KeyMap
 
-	focus     pane
 	showHelp  bool
 	width     int
 	height    int
@@ -80,7 +82,6 @@ func New(client *subsonic.Client, ctrl *player.Controller, opts Options) App {
 		profileSwitch: newProfileSwitchModel(opts.ProfileNames, opts.CurrentProfile),
 		help:          help.New(),
 		keys:          DefaultKeyMap(),
-		focus:         paneLibrary,
 		posCh:         ctrl.PositionStream(ctx),
 		cancelPos:     cancel,
 	}
@@ -112,17 +113,24 @@ func (m App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 
-		// Split the terminal into a library column and a now-playing
-		// column instead of forwarding the full-width message to both —
-		// each submodel used to size itself to the whole terminal and
-		// then get stacked vertically, which is what made the library
-		// list collapse and the cover art render oversized.
-		libW, npW := m.paneWidths()
+		// The library pane gets full width and whatever height remains
+		// above the fixed-height bottom bar; nowPlaying (both its bar and
+		// fullscreen views) gets full width and either barHeight or the
+		// full height, depending on which view is active.
+		libH := m.height - barHeight
+		if libH < 0 {
+			libH = 0
+		}
+		npH := barHeight
+		if m.nowPlaying.IsFullscreen() {
+			npH = m.height
+		}
+
 		var cmds []tea.Cmd
 		var cmd tea.Cmd
-		m.library, cmd = m.library.Update(tea.WindowSizeMsg{Width: libW, Height: msg.Height})
+		m.library, cmd = m.library.Update(tea.WindowSizeMsg{Width: m.width, Height: libH})
 		cmds = append(cmds, cmd)
-		m.nowPlaying, cmd = m.nowPlaying.Update(tea.WindowSizeMsg{Width: npW, Height: msg.Height})
+		m.nowPlaying, cmd = m.nowPlaying.Update(tea.WindowSizeMsg{Width: m.width, Height: npH})
 		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
 
@@ -143,6 +151,15 @@ func (m App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		// In fullscreen lyrics mode, only nowPlaying's own keys (play/pause,
+		// seek, volume, L/esc to leave) apply — library navigation keys
+		// would silently do nothing useful while its pane isn't visible.
+		if m.nowPlaying.IsFullscreen() {
+			var cmd tea.Cmd
+			m.nowPlaying, cmd = m.nowPlaying.Update(msg)
+			return m, cmd
+		}
+
 		switch {
 		case key.Matches(msg, m.keys.Quit):
 			if m.cancelPos != nil {
@@ -151,9 +168,6 @@ func (m App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case key.Matches(msg, m.keys.Help):
 			m.showHelp = !m.showHelp
-			return m, nil
-		case key.Matches(msg, m.keys.Tab):
-			m.focus = togglePane(m.focus)
 			return m, nil
 		case key.Matches(msg, m.keys.Search):
 			m.search = m.search.Open()
@@ -176,46 +190,40 @@ func (m App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// than opening a new PositionStream per tick.
 	if _, ok := msg.(positionTickMsg); ok {
 		var cmd tea.Cmd
+		wasFullscreen := m.nowPlaying.IsFullscreen()
 		m.nowPlaying, cmd = m.nowPlaying.Update(msg)
 		cmds = append(cmds, cmd, waitForPosition(m.posCh))
+		if m.nowPlaying.IsFullscreen() != wasFullscreen {
+			cmds = append(cmds, resizeCmd(m.width, m.height))
+		}
 		return m, tea.Batch(cmds...)
 	}
 
-	// songSelectedMsg and transport keys route to nowPlaying regardless of
-	// focus, so playback controls work while browsing the library.
-	if m.focus == paneLibrary {
-		var cmd tea.Cmd
-		m.library, cmd = m.library.Update(msg)
-		cmds = append(cmds, cmd)
-	}
-
+	// songSelectedMsg and transport keys route to both: the library tree
+	// needs it for navigation/selection, nowPlaying needs it to react to a
+	// newly selected track or a transport key.
 	var cmd tea.Cmd
+	m.library, cmd = m.library.Update(msg)
+	cmds = append(cmds, cmd)
+
+	wasFullscreen := m.nowPlaying.IsFullscreen()
 	m.nowPlaying, cmd = m.nowPlaying.Update(msg)
 	cmds = append(cmds, cmd)
+	if m.nowPlaying.IsFullscreen() != wasFullscreen {
+		cmds = append(cmds, resizeCmd(m.width, m.height))
+	}
 
 	return m, tea.Batch(cmds...)
 }
 
-func togglePane(p pane) pane {
-	if p == paneLibrary {
-		return paneNowPlaying
+// resizeCmd re-delivers the current terminal size as a synthetic
+// WindowSizeMsg, so switching in or out of fullscreen mode immediately
+// re-splits pane heights instead of waiting for the user to actually
+// resize the terminal.
+func resizeCmd(width, height int) tea.Cmd {
+	return func() tea.Msg {
+		return tea.WindowSizeMsg{Width: width, Height: height}
 	}
-	return paneLibrary
-}
-
-// libraryWidthFraction is the portion of the terminal given to the library
-// column; the rest goes to now-playing. Matches the README's mockup, which
-// puts a narrower browse list next to a wider playback view.
-const libraryWidthFraction = 0.4
-
-// paneWidths splits m.width between the library and now-playing columns.
-func (m App) paneWidths() (libW, npW int) {
-	if m.width <= 0 {
-		return minContentWidth, minContentWidth
-	}
-	libW = int(float64(m.width) * libraryWidthFraction)
-	npW = m.width - libW
-	return libW, npW
 }
 
 func (m App) View() string {
@@ -225,11 +233,14 @@ func (m App) View() string {
 	if m.profileSwitch.active {
 		return m.profileSwitch.View()
 	}
+	if m.nowPlaying.IsFullscreen() {
+		return m.nowPlaying.ViewFullscreen()
+	}
 
-	libraryPane := m.library.View(m.focus == paneLibrary)
-	nowPlayingPane := m.nowPlaying.View(m.focus == paneNowPlaying)
-
-	view := lipgloss.JoinHorizontal(lipgloss.Top, libraryPane, nowPlayingPane)
+	view := lipgloss.JoinVertical(lipgloss.Left,
+		m.library.View(true),
+		m.nowPlaying.ViewBar(false),
+	)
 	if m.showHelp {
 		view = lipgloss.JoinVertical(lipgloss.Left, view, m.help.View(m.keys))
 	}

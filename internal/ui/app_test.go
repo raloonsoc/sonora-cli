@@ -9,32 +9,6 @@ import (
 	"github.com/raloonsoc/sonora-cli/internal/artwork"
 )
 
-func TestApp_paneWidths(t *testing.T) {
-	tests := []struct {
-		name        string
-		width       int
-		wantLib     int
-		wantNowPlay int
-	}{
-		{"typical terminal", 100, 40, 60},
-		{"narrow terminal", 60, 24, 36},
-		{"zero width falls back to minContentWidth", 0, minContentWidth, minContentWidth},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := App{width: tt.width}
-			gotLib, gotNP := m.paneWidths()
-			if gotLib != tt.wantLib || gotNP != tt.wantNowPlay {
-				t.Errorf("paneWidths() = (%d, %d), want (%d, %d)", gotLib, gotNP, tt.wantLib, tt.wantNowPlay)
-			}
-			if tt.width > 0 && gotLib+gotNP != tt.width {
-				t.Errorf("paneWidths() sums to %d, want %d", gotLib+gotNP, tt.width)
-			}
-		})
-	}
-}
-
 // newTestApp builds an App without a live client/controller — enough to
 // exercise layout logic (Update on WindowSizeMsg, View) without touching
 // anything that reaches for a real server or mpv process.
@@ -46,7 +20,7 @@ func newTestApp() App {
 	}
 }
 
-func TestApp_windowSizeMsg_splitsBetweenPanes(t *testing.T) {
+func TestApp_windowSizeMsg_splitsHeightAboveBar(t *testing.T) {
 	m := newTestApp()
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	app := updated.(App)
@@ -55,27 +29,55 @@ func TestApp_windowSizeMsg_splitsBetweenPanes(t *testing.T) {
 		t.Fatalf("App size = (%d, %d), want (120, 40)", app.width, app.height)
 	}
 	if app.library.list.Width() == 0 {
-		t.Error("library list width is 0 after a WindowSizeMsg — the panel would render empty")
+		t.Error("library list width is 0 after a WindowSizeMsg — the pane would render empty")
 	}
-	if app.nowPlaying.width == 0 {
-		t.Error("nowPlaying width is 0 after a WindowSizeMsg")
+	_, frameH := paneStyle.GetFrameSize()
+	wantLibH := 40 - barHeight - frameH
+	if app.library.list.Height() != wantLibH {
+		t.Errorf("library list height = %d, want %d (total - barHeight - pane frame)", app.library.list.Height(), wantLibH)
+	}
+	if app.nowPlaying.width != 120 {
+		t.Errorf("nowPlaying width = %d, want 120 (full width, not split)", app.nowPlaying.width)
 	}
 }
 
-func TestApp_view_rendersBothPanesSideBySide(t *testing.T) {
+func TestApp_windowSizeMsg_shortTerminalClampsLibraryHeight(t *testing.T) {
+	m := newTestApp()
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 2})
+	app := updated.(App)
+
+	if app.library.list.Height() < 0 {
+		t.Errorf("library list height = %d, want >= 0 even when terminal is shorter than barHeight", app.library.list.Height())
+	}
+}
+
+func TestApp_view_stacksLibraryAboveBar(t *testing.T) {
 	m := newTestApp()
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	app := updated.(App)
 
 	view := app.View()
-	lines := strings.Split(view, "\n")
-	if len(lines) == 0 {
+	if view == "" {
 		t.Fatal("View() produced no output")
 	}
-	// Side-by-side panes means the first content line should contain
-	// characters from both the library border and the now-playing border,
-	// not just one stacked above the other.
-	if !strings.Contains(lines[0], "─") {
-		t.Errorf("first line = %q, expected a pane border", lines[0])
+	lines := strings.Split(view, "\n")
+	// A vertical stack of two bordered panes is taller than either pane
+	// alone; a regression back to a single unbounded panel would produce
+	// far fewer lines than the terminal height requested.
+	if len(lines) < barHeight {
+		t.Errorf("View() produced %d lines, want at least barHeight (%d)", len(lines), barHeight)
+	}
+}
+
+func TestApp_toggleFullscreen_hidesLibraryPane(t *testing.T) {
+	m := newTestApp()
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	app := updated.(App)
+
+	app.nowPlaying.fullscreen = true
+
+	view := app.View()
+	if strings.Contains(view, "Browse") {
+		t.Error("View() in fullscreen mode should not render the library pane's title")
 	}
 }

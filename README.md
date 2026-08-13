@@ -8,19 +8,21 @@ any OpenSubsonic-compatible server. Cover art, synced lyrics, and
 album-tinted UI — rendered directly in your terminal.
 
 ```
-┌─ Now Playing ──────────────────────────────────────────────────────┐
-│                                                                    │
-│    ▄▄▄▄▄▄▄▄▄▄▄▄▄       Sword of Doom                               │
-│    █▓▓▒▒░░░░▒▒▓█       Kikagaku Moyo                               │
-│    █▓▒░ ░░░░ ░▒█       Masana Temples · 2018                       │
-│    █▓▒░░░░░░░░▒█                                                   │
-│    █▓▓▒▒░░░░▒▒▓█       ▸ Yayoi Iyayoi                              │
-│    ▀▀▀▀▀▀▀▀▀▀▀▀▀         Dripping Sun                              │
-│                        ▸ Nazo Nazo                                 │
-│  ──────────────────────────────────────────────                    │
-│  ▶  2:14 ━━━━━━━━━━━━━━━━━━━━━━━╺━━━━━━━━━━━━ 6:47   🔊 80%        │
-└────────────────────────────────────────────────────────────────────┘
+┌─ Browse ───────────────────────────────────────────────────────────┐
+│  Artists                                                            │
+│ ▸Kikagaku Moyo               12 albums                              │
+│  Dripping Sun                 4 albums                              │
+│  Khruangbin                   6 albums                              │
+└───────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│ ▓▓▓  Sword of Doom              ▶ ━━━━━━━╺━━━━━━ 2:14/6:47  🔊80%  │
+│ ▓▓▓  Kikagaku Moyo · Masana Temples          [L] lyrics            │
+└──────────────────────────────────────────────────────────────────┘
 ```
+
+A full-width browse pane on top, a compact now-playing bar docked at the
+bottom — press `L` to switch to a fullscreen view with centered art and
+large synced lyrics.
 
 ## Features
 
@@ -167,9 +169,9 @@ Press `?` at any time for the in-app help.
 | `q` | Quit |
 | `?` | Toggle help |
 | `/` | Search |
+| `L` | Toggle lyrics view (centered art + large synced lyrics) |
 | `P` | Switch profile |
 | `esc` | Back |
-| `tab` | Cycle panes |
 
 ### Library
 
@@ -181,6 +183,8 @@ Press `?` at any time for the in-app help.
 | `g` / `G` | Jump to top / bottom |
 
 ### Playback
+
+These work everywhere — browsing the library, or inside the lyrics view.
 
 | Key | Action |
 |---|---|

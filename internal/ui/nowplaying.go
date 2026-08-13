@@ -85,7 +85,10 @@ type nowPlayingModel struct {
 	scrobble scrobbleState
 	accent   accentState
 
-	width int // content width in terminal columns, set by App on WindowSizeMsg
+	width  int // content width in terminal columns, set by App on WindowSizeMsg
+	height int // full-screen height, set by App on WindowSizeMsg; unused by the bar view
+
+	fullscreen bool // "Spotify mode": centered art + large synced lyrics
 
 	err error
 }
@@ -102,11 +105,16 @@ type artworkState struct {
 // WindowSizeMsg arrives, so the very first frame isn't drawn at width 0.
 const minContentWidth = 30
 
+// progressBarWidth is fixed in the bottom bar view: it shares one row with
+// art, track info, and transport text, so it can't grow with the terminal
+// the way a full-panel progress bar could.
+const progressBarWidth = 20
+
 func newNowPlayingModel(client *subsonic.Client, ctrl *player.Controller, initialVolume int, term artwork.TermType, mode artwork.Mode, lyricsEnabled bool) nowPlayingModel {
 	return nowPlayingModel{
 		client:      client,
 		ctrl:        ctrl,
-		progress:    progress.New(progress.WithDefaultGradient(), progress.WithWidth(minContentWidth)),
+		progress:    progress.New(progress.WithDefaultGradient(), progress.WithWidth(progressBarWidth)),
 		volume:      initialVolume,
 		artCache:    artwork.NewCache(0),
 		artTerm:     term,
@@ -153,22 +161,29 @@ func coverArtKey(s subsonic.Song) string {
 	return s.AlbumID
 }
 
-// artMaxCols caps cover art width even in a wide terminal — full-panel-width
-// art dwarfs the track info and progress bar next to it.
-const artMaxCols = 34
+// artBarCols/artFullscreenCols bound cover art width for the two views: a
+// thumbnail in the bottom bar, a larger centered image in fullscreen
+// lyrics mode.
+const (
+	artBarCols        = 8
+	artFullscreenCols = 34
+)
 
-// artCols is the panel's content width, capped at artMaxCols and floored so
-// a very narrow terminal still gets a small but present image rather than
-// zero columns.
+// artCols picks the target width for the currently active view, so a mode
+// switch (or a resize) re-renders art at the right size instead of
+// reusing whatever was cached for the other view.
 func (m nowPlayingModel) artCols() int {
-	cols := m.width - borderStyle.GetHorizontalFrameSize()
-	if cols > artMaxCols {
-		cols = artMaxCols
+	if m.fullscreen {
+		cols := m.width
+		if cols > artFullscreenCols {
+			cols = artFullscreenCols
+		}
+		if cols < 10 {
+			cols = 10
+		}
+		return cols
 	}
-	if cols < 10 {
-		cols = 10
-	}
-	return cols
+	return artBarCols
 }
 
 // loadArt fetches and renders cover art for albumID, using the cache when
@@ -211,9 +226,11 @@ func (m nowPlayingModel) Update(msg tea.Msg) (nowPlayingModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
-		m.progress.Width = m.width - borderStyle.GetHorizontalFrameSize()
-		if m.progress.Width < 10 {
-			m.progress.Width = 10
+		m.height = msg.Height
+		if m.fullscreen {
+			m.progress.Width = m.width / 3
+		} else {
+			m.progress.Width = progressBarWidth
 		}
 		// Force a re-render at the new width rather than waiting for the
 		// next track change — a live resize should update the art size
@@ -293,6 +310,10 @@ func (m nowPlayingModel) Update(msg tea.Msg) (nowPlayingModel, tea.Cmd) {
 	case tea.KeyMsg:
 		keys := DefaultKeyMap()
 		switch {
+		case key.Matches(msg, keys.LyricsView):
+			return m.toggleFullscreen()
+		case key.Matches(msg, keys.Back) && m.fullscreen:
+			return m.toggleFullscreen()
 		case key.Matches(msg, keys.PlayPause):
 			return m.togglePause()
 		case key.Matches(msg, keys.Next):
@@ -310,6 +331,23 @@ func (m nowPlayingModel) Update(msg tea.Msg) (nowPlayingModel, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// IsFullscreen reports whether "Spotify mode" is active, so App can decide
+// whether to render the library pane at all this frame.
+func (m nowPlayingModel) IsFullscreen() bool {
+	return m.fullscreen
+}
+
+// toggleFullscreen switches between the bottom-bar view and the centered
+// "Spotify mode" lyrics view, forcing an art re-render at the new target
+// size (artBarCols vs artFullscreenCols) rather than reusing whatever
+// string was rendered for the other view.
+func (m nowPlayingModel) toggleFullscreen() (nowPlayingModel, tea.Cmd) {
+	m.fullscreen = !m.fullscreen
+	m.art = artworkState{}
+	s, _ := m.queue.current()
+	return m, m.loadArt(coverArtKey(s))
 }
 
 func (m nowPlayingModel) togglePause() (nowPlayingModel, tea.Cmd) {
@@ -384,24 +422,25 @@ func (m nowPlayingModel) advanceQueue() (nowPlayingModel, tea.Cmd) {
 	return m, m.playTrack(s)
 }
 
-func (m nowPlayingModel) View(focused bool) string {
-	style := borderStyle
+// ViewBar renders the now-playing state as a single horizontal strip:
+// small cover art, track info, progress, and transport status — meant for
+// a fixed-height bar docked at the bottom of the screen (like a desktop
+// Spotify client), not a tall side panel.
+func (m nowPlayingModel) ViewBar(focused bool) string {
+	style := barStyle
 	if focused {
 		style = style.BorderForeground(focusedBorderColor)
+	} else {
+		style = style.BorderForeground(m.accent.color)
 	}
 
 	if m.err != nil {
-		return style.Render(errorView(m.err))
+		return style.Width(m.width).Render(errorView(m.err))
 	}
 
 	s, ok := m.queue.current()
 	if !ok {
-		return style.Render("Nothing playing — pick a track from the library.")
-	}
-
-	pct := 0.0
-	if m.duration > 0 {
-		pct = m.position.Seconds() / m.duration.Seconds()
+		return style.Width(m.width).Render(metaStyle.Render("Nothing playing — pick a track from the library."))
 	}
 
 	status := "▶"
@@ -409,31 +448,97 @@ func (m nowPlayingModel) View(focused bool) string {
 		status = "⏸"
 	}
 
-	body := fmt.Sprintf(
-		"%s\n%s\n\n%s %s / %s  🔊 %d%%\n%s",
-		titleStyle.Render(s.Title),
-		metaStyle.Render(fmt.Sprintf("%s · %s", s.Artist, s.Album)),
-		status,
-		formatDuration(m.position),
-		formatDuration(m.duration),
-		m.volume,
-		m.progress.ViewAs(pct),
+	info := lipgloss.JoinVertical(lipgloss.Left,
+		titleStyle.Render(truncate(s.Title, barInfoWidth)),
+		metaStyle.Render(truncate(fmt.Sprintf("%s · %s", s.Artist, s.Album), barInfoWidth)),
 	)
 
+	pct := 0.0
+	if m.duration > 0 {
+		pct = m.position.Seconds() / m.duration.Seconds()
+	}
+	transport := fmt.Sprintf(
+		"%s %s %s / %s   🔊 %d%%   [L] lyrics",
+		status, m.progress.ViewAs(pct), formatDuration(m.position), formatDuration(m.duration), m.volume,
+	)
+
+	row := lipgloss.JoinHorizontal(lipgloss.Center, m.artBarThumbnail(), "  ", info, "   ", transport)
+	return style.Width(m.width).Render(row)
+}
+
+// barInfoWidth caps the title/artist column so a long track name doesn't
+// push the progress bar and controls off the edge of a narrow terminal.
+const barInfoWidth = 28
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	if max <= 1 {
+		return s[:max]
+	}
+	return s[:max-1] + "…"
+}
+
+// artBarThumbnail returns the cached art already sized for the bar (see
+// artCols/barArtCols), or a blank placeholder of the same footprint so the
+// bar's height doesn't jump around while art is loading.
+func (m nowPlayingModel) artBarThumbnail() string {
 	if m.art.rendered != "" {
-		body = m.art.rendered + "\n" + body
+		return m.art.rendered
+	}
+	return ""
+}
+
+// ViewFullscreen renders the "Spotify mode" view: small centered art, large
+// centered synced lyrics, transport status below — toggled by the L key
+// (ROADMAP-adjacent UX request, not tied to a SPECS section).
+func (m nowPlayingModel) ViewFullscreen() string {
+	if m.err != nil {
+		return errorView(m.err)
 	}
 
-	if m.lyricsShown {
-		if lv := m.lyrics.View(int(m.position.Milliseconds()), m.accent.color); lv != "" {
-			body += "\n" + lv
-		}
+	s, ok := m.queue.current()
+	if !ok {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			metaStyle.Render("Nothing playing — pick a track from the library."))
 	}
 
-	if !focused {
-		style = style.BorderForeground(m.accent.color)
+	status := "▶"
+	if m.paused {
+		status = "⏸"
 	}
-	return style.Render(body)
+	pct := 0.0
+	if m.duration > 0 {
+		pct = m.position.Seconds() / m.duration.Seconds()
+	}
+
+	header := lipgloss.JoinVertical(lipgloss.Center,
+		m.art.rendered,
+		titleStyle.Render(s.Title),
+		metaStyle.Render(fmt.Sprintf("%s · %s", s.Artist, s.Album)),
+	)
+
+	lyricsView := m.lyrics.View(int(m.position.Milliseconds()), m.accent.color)
+	if lyricsView == "" {
+		lyricsView = metaStyle.Render("No lyrics available for this track.")
+	}
+
+	footer := fmt.Sprintf(
+		"%s %s / %s   🔊 %d%%   [esc/L] back",
+		status, formatDuration(m.position), formatDuration(m.duration), m.volume,
+	)
+
+	body := lipgloss.JoinVertical(lipgloss.Center,
+		header,
+		"",
+		m.progress.ViewAs(pct),
+		"",
+		centeredStyle.Width(m.width).Render(lyricsView),
+		"",
+		footer,
+	)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, body)
 }
 
 func formatDuration(d time.Duration) string {

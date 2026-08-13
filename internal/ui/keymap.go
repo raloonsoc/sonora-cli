@@ -24,6 +24,7 @@ type KeyMap struct {
 	VolDown       key.Binding
 	VolUp         key.Binding
 	SwitchProfile key.Binding
+	LyricsView    key.Binding
 }
 
 // DefaultKeyMap matches the bindings documented in README.md.
@@ -48,6 +49,7 @@ func DefaultKeyMap() KeyMap {
 		VolDown:       key.NewBinding(key.WithKeys("-"), key.WithHelp("-", "volume down")),
 		VolUp:         key.NewBinding(key.WithKeys("+"), key.WithHelp("+", "volume up")),
 		SwitchProfile: key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "switch profile")),
+		LyricsView:    key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "lyrics view")),
 	}
 }
 
@@ -61,6 +63,6 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Enter, k.AddToQueue, k.Top, k.Bottom},
 		{k.PlayPause, k.Next, k.Prev, k.SeekBack, k.SeekFwd, k.VolDown, k.VolUp},
-		{k.Search, k.Tab, k.SwitchProfile, k.Back, k.Help, k.Quit},
+		{k.Search, k.Tab, k.LyricsView, k.SwitchProfile, k.Back, k.Help, k.Quit},
 	}
 }

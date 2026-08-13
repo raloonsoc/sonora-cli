@@ -111,7 +111,10 @@ func runSession(cfg *config.Config, profileName string) (string, error) {
 		ProfileNames:   profileNames,
 		CurrentProfile: profileName,
 	})
-	p := tea.NewProgram(app)
+	// AltScreen: run in the terminal's alternate screen buffer, like vim or
+	// less, so sonora doesn't scroll the shell history and repaints a full
+	// frame each tick instead of appending lines to it.
+	p := tea.NewProgram(app, tea.WithAltScreen())
 
 	// SIGINT/SIGTERM: quit the Bubble Tea program so the deferred
 	// ctrl.Close() above runs and mpv/the socket are cleaned up, instead of
@@ -200,7 +203,7 @@ func persistRefreshToken(cfg *config.Config, profileName string, prof config.Pro
 // runFirstRunSetup prompts for server URL / username / password and writes
 // the resulting profile to cfg's config file (ROADMAP Phase 3).
 func runFirstRunSetup(cfg *config.Config) error {
-	p := tea.NewProgram(ui.NewFirstRunModel())
+	p := tea.NewProgram(ui.NewFirstRunModel(), tea.WithAltScreen())
 	m, err := p.Run()
 	if err != nil {
 		return fmt.Errorf("first-run setup: %w", err)
