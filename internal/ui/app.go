@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/raloonsoc/sonora-cli/internal/artwork"
 	"github.com/raloonsoc/sonora-cli/internal/player"
@@ -111,6 +112,20 @@ func (m App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 
+		// Split the terminal into a library column and a now-playing
+		// column instead of forwarding the full-width message to both —
+		// each submodel used to size itself to the whole terminal and
+		// then get stacked vertically, which is what made the library
+		// list collapse and the cover art render oversized.
+		libW, npW := m.paneWidths()
+		var cmds []tea.Cmd
+		var cmd tea.Cmd
+		m.library, cmd = m.library.Update(tea.WindowSizeMsg{Width: libW, Height: msg.Height})
+		cmds = append(cmds, cmd)
+		m.nowPlaying, cmd = m.nowPlaying.Update(tea.WindowSizeMsg{Width: npW, Height: msg.Height})
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...)
+
 	case tea.KeyMsg:
 		// While search is active, every key goes to its text input first —
 		// including letters that double as global bindings (q, ?, tab) —
@@ -188,6 +203,21 @@ func togglePane(p pane) pane {
 	return paneLibrary
 }
 
+// libraryWidthFraction is the portion of the terminal given to the library
+// column; the rest goes to now-playing. Matches the README's mockup, which
+// puts a narrower browse list next to a wider playback view.
+const libraryWidthFraction = 0.4
+
+// paneWidths splits m.width between the library and now-playing columns.
+func (m App) paneWidths() (libW, npW int) {
+	if m.width <= 0 {
+		return minContentWidth, minContentWidth
+	}
+	libW = int(float64(m.width) * libraryWidthFraction)
+	npW = m.width - libW
+	return libW, npW
+}
+
 func (m App) View() string {
 	if m.search.active {
 		return m.search.View()
@@ -196,9 +226,12 @@ func (m App) View() string {
 		return m.profileSwitch.View()
 	}
 
-	view := m.library.View() + "\n\n" + m.nowPlaying.View()
+	libraryPane := m.library.View(m.focus == paneLibrary)
+	nowPlayingPane := m.nowPlaying.View(m.focus == paneNowPlaying)
+
+	view := lipgloss.JoinHorizontal(lipgloss.Top, libraryPane, nowPlayingPane)
 	if m.showHelp {
-		view += "\n\n" + m.help.View(m.keys)
+		view = lipgloss.JoinVertical(lipgloss.Left, view, m.help.View(m.keys))
 	}
 	return view
 }

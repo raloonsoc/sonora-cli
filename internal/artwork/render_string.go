@@ -11,9 +11,9 @@ import (
 // protocols (Kitty, iTerm2, Sixel) work here because their encoders emit
 // terminal escape sequences as plain bytes, which pass through untouched
 // as part of the rendered string.
-func RenderString(img image.Image, term TermType, mode Mode) (string, error) {
+func RenderString(img image.Image, term TermType, mode Mode, cols int) (string, error) {
 	var buf bytes.Buffer
-	if err := Render(&buf, img, term, mode); err != nil {
+	if err := Render(&buf, img, term, mode, cols); err != nil {
 		return "", err
 	}
 	return buf.String(), nil

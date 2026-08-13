@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/BourgeoisBear/rasterm"
+	"github.com/nfnt/resize"
 	"github.com/qeesung/image2ascii/convert"
 )
 
@@ -21,57 +22,97 @@ const (
 	ModeOff   Mode = "off"
 )
 
+// cellAspect approximates a terminal cell's height-to-width ratio. Most
+// monospace fonts render cells roughly twice as tall as they are wide, so
+// covering `cols` terminal columns with a square-ish image needs about
+// cols/2 rows — without this, art renders at native resolution mapped
+// 1:1 to cells and comes out stretched (Sixel/ASCII) or simply huge
+// (Kitty/iTerm2, which otherwise display at the image's native pixel size).
+const cellAspect = 2.0
+
 // Render encodes img for the terminal into out, dispatching on term (or
-// forcing ASCII when mode is ModeASCII). ModeOff callers should skip
-// calling Render entirely; it is not handled here since there's nothing to
-// render.
-func Render(out io.Writer, img image.Image, term TermType, mode Mode) error {
+// forcing ASCII when mode is ModeASCII), scaled to fit within cols terminal
+// columns. ModeOff callers should skip calling Render entirely; it is not
+// handled here since there's nothing to render.
+func Render(out io.Writer, img image.Image, term TermType, mode Mode, cols int) error {
+	if cols <= 0 {
+		cols = defaultCols
+	}
+	rows := targetRows(img, cols)
+
 	if mode == ModeASCII {
-		return renderASCII(out, img)
+		return renderASCII(out, img, cols, rows)
 	}
 
 	switch term {
 	case TermKitty:
-		if err := rasterm.KittyWriteImage(out, img, rasterm.KittyImgOpts{}); err != nil {
+		opts := rasterm.KittyImgOpts{DstCols: uint32(cols), DstRows: uint32(rows)}
+		if err := rasterm.KittyWriteImage(out, img, opts); err != nil {
 			return fmt.Errorf("artwork: kitty render: %w", err)
 		}
 		return nil
 	case TermITerm2:
-		if err := rasterm.ItermWriteImage(out, img); err != nil {
+		opts := rasterm.ItermImgOpts{
+			Width:             fmt.Sprintf("%d", cols),
+			Height:            fmt.Sprintf("%d", rows),
+			IgnoreAspectRatio: true, // rows is already derived from the image's own aspect ratio
+			DisplayInline:     true,
+		}
+		if err := rasterm.ItermWriteImageWithOptions(out, img, opts); err != nil {
 			return fmt.Errorf("artwork: iterm2 render: %w", err)
 		}
 		return nil
 	case TermSixel:
-		pImg, ok := img.(*image.Paletted)
+		scaled := resize.Thumbnail(uint(cols)*sixelPxPerCol, uint(rows)*sixelPxPerRow, img, resize.Lanczos3)
+		pImg, ok := scaled.(*image.Paletted)
 		if !ok {
-			pImg = toPaletted(img)
+			pImg = toPaletted(scaled)
 		}
 		if err := rasterm.SixelWriteImage(out, pImg); err != nil {
 			return fmt.Errorf("artwork: sixel render: %w", err)
 		}
 		return nil
 	default:
-		return renderASCII(out, img)
+		return renderASCII(out, img, cols, rows)
 	}
 }
 
-// asciiWidth/asciiHeight bound the ASCII fallback's cell footprint. Fixed
-// rather than auto-detected: image2ascii's FitScreen/StretchedScreen modes
-// (on by default in convert.DefaultOptions) call out to terminal size
-// detection and log.Fatal — killing the whole process — if that probe
-// fails, which is not a risk worth taking for a cosmetic fallback render.
+// defaultCols is used when a caller doesn't have a layout-derived width yet
+// (e.g. before the first WindowSizeMsg).
+const defaultCols = 30
+
+// sixelPxPerCol/sixelPxPerRow are a rough cell-to-pixel conversion for
+// Sixel, which has no notion of "display in N columns" the way Kitty/iTerm2
+// do — the image is rasterized at a pixel size and the terminal maps that
+// to however many cells it covers.
 const (
-	asciiWidth  = 40
-	asciiHeight = 20
+	sixelPxPerCol = 10
+	sixelPxPerRow = 20
 )
 
-func renderASCII(out io.Writer, img image.Image) error {
+// targetRows derives a row count from cols using the image's own aspect
+// ratio and cellAspect, so cover art (usually square) doesn't get squashed
+// or stretched.
+func targetRows(img image.Image, cols int) int {
+	b := img.Bounds()
+	if b.Dx() == 0 {
+		return cols
+	}
+	imgAspect := float64(b.Dy()) / float64(b.Dx())
+	rows := int(float64(cols) * imgAspect / cellAspect)
+	if rows < 1 {
+		rows = 1
+	}
+	return rows
+}
+
+func renderASCII(out io.Writer, img image.Image, cols, rows int) error {
 	converter := convert.NewImageConverter()
 	opts := convert.DefaultOptions
 	opts.Colored = true
 	opts.FitScreen = false
-	opts.FixedWidth = asciiWidth
-	opts.FixedHeight = asciiHeight
+	opts.FixedWidth = cols
+	opts.FixedHeight = rows
 	s := converter.Image2ASCIIString(img, &opts)
 	_, err := io.WriteString(out, s)
 	if err != nil {

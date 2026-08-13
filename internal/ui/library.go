@@ -287,7 +287,15 @@ func (m libraryModel) Update(msg tea.Msg) (libraryModel, tea.Cmd) {
 		return m, nil
 
 	case tea.WindowSizeMsg:
-		m.list.SetSize(msg.Width, msg.Height)
+		frameW, frameH := paneStyle.GetFrameSize()
+		w, h := msg.Width-frameW, msg.Height-frameH
+		if w < 0 {
+			w = 0
+		}
+		if h < 0 {
+			h = 0
+		}
+		m.list.SetSize(w, h)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -392,9 +400,13 @@ func (m libraryModel) goBack() (libraryModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m libraryModel) View() string {
-	if m.err != nil {
-		return errorView(m.err)
+func (m libraryModel) View(focused bool) string {
+	style := paneStyle
+	if focused {
+		style = style.BorderForeground(focusedBorderColor)
 	}
-	return m.list.View()
+	if m.err != nil {
+		return style.Render(errorView(m.err))
+	}
+	return style.Render(m.list.View())
 }

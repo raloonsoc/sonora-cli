@@ -85,6 +85,8 @@ type nowPlayingModel struct {
 	scrobble scrobbleState
 	accent   accentState
 
+	width int // content width in terminal columns, set by App on WindowSizeMsg
+
 	err error
 }
 
@@ -96,17 +98,22 @@ type artworkState struct {
 	rendered string
 }
 
+// minContentWidth is the floor nowPlayingModel renders at before the first
+// WindowSizeMsg arrives, so the very first frame isn't drawn at width 0.
+const minContentWidth = 30
+
 func newNowPlayingModel(client *subsonic.Client, ctrl *player.Controller, initialVolume int, term artwork.TermType, mode artwork.Mode, lyricsEnabled bool) nowPlayingModel {
 	return nowPlayingModel{
 		client:      client,
 		ctrl:        ctrl,
-		progress:    progress.New(progress.WithDefaultGradient()),
+		progress:    progress.New(progress.WithDefaultGradient(), progress.WithWidth(minContentWidth)),
 		volume:      initialVolume,
 		artCache:    artwork.NewCache(0),
 		artTerm:     term,
 		artMode:     mode,
 		lyricsShown: lyricsEnabled,
 		accent:      accentState{color: defaultAccent},
+		width:       minContentWidth,
 	}
 }
 
@@ -146,6 +153,24 @@ func coverArtKey(s subsonic.Song) string {
 	return s.AlbumID
 }
 
+// artMaxCols caps cover art width even in a wide terminal — full-panel-width
+// art dwarfs the track info and progress bar next to it.
+const artMaxCols = 34
+
+// artCols is the panel's content width, capped at artMaxCols and floored so
+// a very narrow terminal still gets a small but present image rather than
+// zero columns.
+func (m nowPlayingModel) artCols() int {
+	cols := m.width - borderStyle.GetHorizontalFrameSize()
+	if cols > artMaxCols {
+		cols = artMaxCols
+	}
+	if cols < 10 {
+		cols = 10
+	}
+	return cols
+}
+
 // loadArt fetches and renders cover art for albumID, using the cache when
 // available. mode == ModeOff skips the fetch entirely — no network call for
 // art the user asked not to render. Re-renders only on track change per
@@ -154,9 +179,10 @@ func (m nowPlayingModel) loadArt(albumID string) tea.Cmd {
 	if albumID == "" || m.artMode == artwork.ModeOff || albumID == m.art.albumID {
 		return nil
 	}
+	artCols := m.artCols()
 	return func() tea.Msg {
 		if cached, ok := m.artCache.Get(albumID); ok {
-			rendered, err := artwork.RenderString(cached, m.artTerm, m.artMode)
+			rendered, err := artwork.RenderString(cached, m.artTerm, m.artMode, artCols)
 			if err != nil {
 				return nil // degrade silently: keep showing the previous frame
 			}
@@ -173,7 +199,7 @@ func (m nowPlayingModel) loadArt(albumID string) tea.Cmd {
 		}
 		m.artCache.Put(albumID, img)
 
-		rendered, err := artwork.RenderString(img, m.artTerm, m.artMode)
+		rendered, err := artwork.RenderString(img, m.artTerm, m.artMode, artCols)
 		if err != nil {
 			return nil
 		}
@@ -183,6 +209,20 @@ func (m nowPlayingModel) loadArt(albumID string) tea.Cmd {
 
 func (m nowPlayingModel) Update(msg tea.Msg) (nowPlayingModel, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.progress.Width = m.width - borderStyle.GetHorizontalFrameSize()
+		if m.progress.Width < 10 {
+			m.progress.Width = 10
+		}
+		// Force a re-render at the new width rather than waiting for the
+		// next track change — a live resize should update the art size
+		// immediately, not stay stuck at whatever it was. loadArt is a
+		// no-op if nothing is queued (coverArtKey of a zero Song is "").
+		m.art = artworkState{}
+		s, _ := m.queue.current()
+		return m, m.loadArt(coverArtKey(s))
+
 	case songSelectedMsg:
 		m.queue.add(msg.song)
 		m.queue.pos = len(m.queue.tracks) - 1
@@ -344,20 +384,19 @@ func (m nowPlayingModel) advanceQueue() (nowPlayingModel, tea.Cmd) {
 	return m, m.playTrack(s)
 }
 
-var (
-	titleStyle  = lipgloss.NewStyle().Bold(true)
-	metaStyle   = lipgloss.NewStyle().Faint(true)
-	borderStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2)
-)
+func (m nowPlayingModel) View(focused bool) string {
+	style := borderStyle
+	if focused {
+		style = style.BorderForeground(focusedBorderColor)
+	}
 
-func (m nowPlayingModel) View() string {
 	if m.err != nil {
-		return errorView(m.err)
+		return style.Render(errorView(m.err))
 	}
 
 	s, ok := m.queue.current()
 	if !ok {
-		return borderStyle.Render("Nothing playing — pick a track from the library.")
+		return style.Render("Nothing playing — pick a track from the library.")
 	}
 
 	pct := 0.0
@@ -391,8 +430,10 @@ func (m nowPlayingModel) View() string {
 		}
 	}
 
-	accentBorder := borderStyle.BorderForeground(m.accent.color)
-	return accentBorder.Render(body)
+	if !focused {
+		style = style.BorderForeground(m.accent.color)
+	}
+	return style.Render(body)
 }
 
 func formatDuration(d time.Duration) string {
