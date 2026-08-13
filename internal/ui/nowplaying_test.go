@@ -1,9 +1,11 @@
 package ui
 
 import (
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/raloonsoc/sonora-cli/internal/player"
 	"github.com/raloonsoc/sonora-cli/internal/subsonic"
 )
 
@@ -59,6 +61,28 @@ func TestQueue_addSetsPosOnFirstTrack(t *testing.T) {
 	q.add(subsonic.Song{ID: "1"})
 	if q.pos != 0 {
 		t.Errorf("pos = %d, want 0 after adding to an empty queue", q.pos)
+	}
+}
+
+func TestNowPlayingModel_positionTick_propertyUnavailableIsSilent(t *testing.T) {
+	m := nowPlayingModel{}
+
+	updated, cmd := m.Update(positionTickMsg{Err: player.ErrPropertyUnavailable})
+	if updated.err != nil {
+		t.Errorf("err = %v, want nil — property unavailable means nothing is loaded yet, not a failure", updated.err)
+	}
+	if cmd != nil {
+		t.Errorf("cmd = %v, want nil", cmd)
+	}
+}
+
+func TestNowPlayingModel_positionTick_realErrorIsSurfaced(t *testing.T) {
+	m := nowPlayingModel{}
+	wantErr := errors.New("mpv crashed")
+
+	updated, _ := m.Update(positionTickMsg{Err: wantErr})
+	if !errors.Is(updated.err, wantErr) {
+		t.Errorf("err = %v, want %v", updated.err, wantErr)
 	}
 }
 

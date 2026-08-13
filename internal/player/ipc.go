@@ -5,11 +5,19 @@ package player
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
 	"time"
 )
+
+// ErrPropertyUnavailable is mpv's response to get_property for a property
+// that exists but has no current value — e.g. time-pos or idle-active
+// before any file has ever been loaded. It is a normal, expected state
+// (nothing is playing yet), not a playback failure, so callers can check
+// errors.Is against it to distinguish "nothing loaded" from a real error.
+var ErrPropertyUnavailable = errors.New("mpv: property unavailable")
 
 // waitForSocketTimeout bounds how long waitForSocket polls before giving
 // up. A var, not a const, so tests can shrink it instead of eating the real
@@ -138,6 +146,9 @@ func (c *ipcConn) call(command []any) (json.RawMessage, error) {
 	}
 
 	resp := <-ch
+	if resp.Error == "property unavailable" {
+		return nil, ErrPropertyUnavailable
+	}
 	if resp.Error != "" && resp.Error != "success" {
 		return nil, fmt.Errorf("player: mpv error: %s", resp.Error)
 	}

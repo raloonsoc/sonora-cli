@@ -5,6 +5,7 @@ package player
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -89,7 +90,7 @@ func TestIPCConn_call_success(t *testing.T) {
 
 func TestIPCConn_call_error(t *testing.T) {
 	sock := fakeMPV(t, func(req ipcRequest) ipcResponse {
-		return ipcResponse{Error: "property unavailable"}
+		return ipcResponse{Error: "some other mpv error"}
 	})
 
 	conn, err := newIPCConn(sock)
@@ -101,6 +102,26 @@ func TestIPCConn_call_error(t *testing.T) {
 	_, err = conn.call([]any{"get_property", "time-pos"})
 	if err == nil {
 		t.Fatal("call() expected error, got nil")
+	}
+	if errors.Is(err, ErrPropertyUnavailable) {
+		t.Error("a generic mpv error should not match ErrPropertyUnavailable")
+	}
+}
+
+func TestIPCConn_call_propertyUnavailable(t *testing.T) {
+	sock := fakeMPV(t, func(req ipcRequest) ipcResponse {
+		return ipcResponse{Error: "property unavailable"}
+	})
+
+	conn, err := newIPCConn(sock)
+	if err != nil {
+		t.Fatalf("newIPCConn: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	_, err = conn.call([]any{"get_property", "time-pos"})
+	if !errors.Is(err, ErrPropertyUnavailable) {
+		t.Fatalf("call() err = %v, want ErrPropertyUnavailable", err)
 	}
 }
 

@@ -3,6 +3,7 @@ package ui
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/jpeg" // getCoverArt.view commonly serves JPEG
@@ -227,6 +228,11 @@ func (m nowPlayingModel) Update(msg tea.Msg) (nowPlayingModel, tea.Cmd) {
 
 	case positionTickMsg:
 		if msg.Err != nil {
+			if errors.Is(msg.Err, player.ErrPropertyUnavailable) {
+				// mpv has nothing loaded yet (before the first track, or
+				// briefly between tracks) — expected, not a failure.
+				return m, nil
+			}
 			m.err = msg.Err
 			return m, nil
 		}
