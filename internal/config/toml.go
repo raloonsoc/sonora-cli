@@ -16,7 +16,10 @@ func encodeFile(path string, cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // encode error, if any, is returned below
 
-	return toml.NewEncoder(f).Encode(cfg)
+	if err := toml.NewEncoder(f).Encode(cfg); err != nil {
+		return err
+	}
+	return f.Close()
 }
