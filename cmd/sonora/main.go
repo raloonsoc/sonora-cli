@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/raloonsoc/sonora-cli/internal/artwork"
 	"github.com/raloonsoc/sonora-cli/internal/config"
+	"github.com/raloonsoc/sonora-cli/internal/nativeapi"
 	"github.com/raloonsoc/sonora-cli/internal/player"
 	"github.com/raloonsoc/sonora-cli/internal/subsonic"
 	"github.com/raloonsoc/sonora-cli/internal/ui"
@@ -59,7 +61,7 @@ func run() error {
 		return fmt.Errorf("no profile named %q in config", cfg.DefaultProfile)
 	}
 
-	auth, err := subsonic.NewTokenAuth(prof.Username, prof.Password)
+	auth, err := buildAuth(cfg, prof)
 	if err != nil {
 		return fmt.Errorf("build auth: %w", err)
 	}
@@ -97,6 +99,72 @@ func run() error {
 		return fmt.Errorf("run tui: %w", err)
 	}
 
+	return nil
+}
+
+// buildAuth constructs the subsonic.AuthProvider for prof, dispatching on
+// its Auth field (SPECS §4.3's AuthProvider swap is meant to be exactly
+// this: a config flag, not a rewrite of call sites).
+func buildAuth(cfg *config.Config, prof config.Profile) (subsonic.AuthProvider, error) {
+	switch prof.Auth {
+	case "native":
+		return buildNativeAuth(cfg, prof)
+	default: // "subsonic", or unset defaulting to it
+		return subsonic.NewTokenAuth(prof.Username, prof.Password)
+	}
+}
+
+// buildNativeAuth logs in with a fresh refresh token if none is stored yet,
+// or refreshes an existing one — so the caller always starts the session
+// with a live access token (SPECS §4.3: "refreshed transparently before
+// each session"). Only the refresh token is persisted afterward; the
+// access token stays in memory (nativeapi.BearerAuth).
+func buildNativeAuth(cfg *config.Config, prof config.Profile) (subsonic.AuthProvider, error) {
+	auth := &nativeapi.BearerAuth{}
+	nc := nativeapi.NewClient(prof.URL, auth, nil)
+	profileName := cfg.DefaultProfile
+
+	refreshToken, fromKeychain, err := config.LoadRefreshToken(profileName)
+	if err != nil {
+		return nil, fmt.Errorf("load refresh token: %w", err)
+	}
+	if !fromKeychain {
+		refreshToken = prof.RefreshToken // 0600 config-file fallback
+	}
+
+	ctx := context.Background()
+	if refreshToken != "" {
+		nc.SetRefreshToken(refreshToken)
+		if err := nc.Refresh(ctx); err != nil {
+			return nil, fmt.Errorf("refresh session: %w", err)
+		}
+	} else {
+		if err := nc.Login(ctx, prof.Username, prof.Password); err != nil {
+			return nil, fmt.Errorf("login: %w", err)
+		}
+	}
+
+	if err := persistRefreshToken(cfg, profileName, prof, nc.RefreshToken()); err != nil {
+		return nil, err
+	}
+
+	return auth, nil
+}
+
+// persistRefreshToken saves the rotated refresh token to the keychain,
+// falling back to the 0600 config file — documented, not silent — when no
+// keychain is available (SPECS §4.1's storage preference order, reused
+// here for the native auth flow).
+func persistRefreshToken(cfg *config.Config, profileName string, prof config.Profile, token string) error {
+	if err := config.SaveRefreshToken(profileName, token); err == nil {
+		return nil
+	}
+
+	prof.RefreshToken = token
+	cfg.AddProfile(profileName, prof)
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("persist refresh token: %w", err)
+	}
 	return nil
 }
 

@@ -11,8 +11,13 @@ import (
 type Profile struct {
 	URL      string `toml:"url"`
 	Username string `toml:"username"`
-	Password string `toml:"password,omitempty"`
-	Auth     string `toml:"auth"` // "subsonic" | "native"
+	Password string `toml:"password,omitempty"` // Auth == "subsonic"; see README's Password storage section
+	Auth     string `toml:"auth"`               // "subsonic" | "native"
+
+	// RefreshToken is the 0600-config-file fallback for native auth
+	// (SPECS §4.3) when no OS keychain is available. The access token is
+	// never persisted, in memory or on disk.
+	RefreshToken string `toml:"refresh_token,omitempty"`
 }
 
 // UI holds display preferences.
