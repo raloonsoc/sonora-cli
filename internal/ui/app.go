@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/raloonsoc/sonora-cli/internal/artwork"
 	"github.com/raloonsoc/sonora-cli/internal/player"
 	"github.com/raloonsoc/sonora-cli/internal/subsonic"
 )
@@ -43,18 +44,21 @@ type App struct {
 
 // New builds the root model. ctrl must already be running (see
 // player.New); App does not own its lifecycle beyond the session.
+// artMode selects cover art rendering ("auto" | "ascii" | "off"); term is
+// the terminal's detected graphics capability, ignored when artMode is
+// ModeASCII or ModeOff.
 //
 // The position-poll channel is opened here, not in Init, because Init
 // returns only a tea.Cmd (no updated model) under Bubble Tea's
 // value-receiver convention — the channel and its cancel func need to live
 // on the value New returns.
-func New(client *subsonic.Client, ctrl *player.Controller, initialVolume int) App {
+func New(client *subsonic.Client, ctrl *player.Controller, initialVolume int, term artwork.TermType, artMode artwork.Mode) App {
 	ctx, cancel := context.WithCancel(context.Background())
 	return App{
 		client:     client,
 		ctrl:       ctrl,
 		library:    newLibraryModel(client),
-		nowPlaying: newNowPlayingModel(client, ctrl, initialVolume),
+		nowPlaying: newNowPlayingModel(client, ctrl, initialVolume, term, artMode),
 		help:       help.New(),
 		keys:       DefaultKeyMap(),
 		focus:      paneLibrary,

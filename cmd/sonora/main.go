@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/raloonsoc/sonora-cli/internal/artwork"
 	"github.com/raloonsoc/sonora-cli/internal/config"
 	"github.com/raloonsoc/sonora-cli/internal/player"
 	"github.com/raloonsoc/sonora-cli/internal/subsonic"
@@ -74,7 +75,8 @@ func run() error {
 		return fmt.Errorf("set initial volume: %w", err)
 	}
 
-	app := ui.New(client, ctrl, cfg.Playback.Volume)
+	term := artwork.DetectTermType() // once at startup; cached for the session (SPECS §6.1)
+	app := ui.New(client, ctrl, cfg.Playback.Volume, term, artwork.Mode(cfg.UI.Art))
 	p := tea.NewProgram(app)
 
 	// SIGINT/SIGTERM: quit the Bubble Tea program so the deferred

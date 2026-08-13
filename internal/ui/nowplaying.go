@@ -1,7 +1,12 @@
 package ui
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"image"
+	_ "image/jpeg" // getCoverArt.view commonly serves JPEG
+	_ "image/png"  // ...and occasionally PNG
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -9,9 +14,14 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/raloonsoc/sonora-cli/internal/artwork"
 	"github.com/raloonsoc/sonora-cli/internal/player"
 	"github.com/raloonsoc/sonora-cli/internal/subsonic"
 )
+
+// coverArtSize is the pixel hint passed to getCoverArt.view — matched
+// loosely to how much of a terminal cell grid the art occupies (SPECS §6.2).
+const coverArtSize = 300
 
 // queue is the CLI-local, ephemeral session playlist. Server playlists are
 // read-only (SPECS §11), so "add to queue" has no server counterpart in v1.
@@ -63,15 +73,31 @@ type nowPlayingModel struct {
 	paused   bool
 	volume   int
 
+	art      artworkState
+	artCache *artwork.Cache
+	artTerm  artwork.TermType
+	artMode  artwork.Mode
+
 	err error
 }
 
-func newNowPlayingModel(client *subsonic.Client, ctrl *player.Controller, initialVolume int) nowPlayingModel {
+// artworkState holds the rendered cover art for the current track, kept
+// separate from playback state so a re-render only happens on track change
+// (SPECS §6.3), not on every ~500ms position tick.
+type artworkState struct {
+	albumID  string
+	rendered string
+}
+
+func newNowPlayingModel(client *subsonic.Client, ctrl *player.Controller, initialVolume int, term artwork.TermType, mode artwork.Mode) nowPlayingModel {
 	return nowPlayingModel{
 		client:   client,
 		ctrl:     ctrl,
 		progress: progress.New(progress.WithDefaultGradient()),
 		volume:   initialVolume,
+		artCache: artwork.NewCache(0),
+		artTerm:  term,
+		artMode:  mode,
 	}
 }
 
@@ -93,6 +119,59 @@ func (m nowPlayingModel) playTrack(s subsonic.Song) tea.Cmd {
 type trackStartedMsg struct{ song subsonic.Song }
 type playErrMsg struct{ err error }
 
+// artLoadedMsg carries a rendered cover art string, or a decode/fetch
+// failure that should degrade silently (missing art is not a playback
+// error worth surfacing to errorView).
+type artLoadedMsg struct {
+	albumID  string
+	rendered string
+}
+
+// coverArtKey picks the ID getCoverArt.view should be called with: the
+// song's own cover (rare — usually set only when it differs from the
+// album's), falling back to the album ID.
+func coverArtKey(s subsonic.Song) string {
+	if s.CoverArt != "" {
+		return s.CoverArt
+	}
+	return s.AlbumID
+}
+
+// loadArt fetches and renders cover art for albumID, using the cache when
+// available. mode == ModeOff skips the fetch entirely — no network call for
+// art the user asked not to render. Re-renders only on track change per
+// SPECS §6.3: a no-op if albumID already matches what's on screen.
+func (m nowPlayingModel) loadArt(albumID string) tea.Cmd {
+	if albumID == "" || m.artMode == artwork.ModeOff || albumID == m.art.albumID {
+		return nil
+	}
+	return func() tea.Msg {
+		if cached, ok := m.artCache.Get(albumID); ok {
+			rendered, err := artwork.RenderString(cached, m.artTerm, m.artMode)
+			if err != nil {
+				return nil // degrade silently: keep showing the previous frame
+			}
+			return artLoadedMsg{albumID: albumID, rendered: rendered}
+		}
+
+		data, err := m.client.GetCoverArt(context.Background(), albumID, coverArtSize)
+		if err != nil {
+			return nil
+		}
+		img, _, err := image.Decode(bytes.NewReader(data))
+		if err != nil {
+			return nil
+		}
+		m.artCache.Put(albumID, img)
+
+		rendered, err := artwork.RenderString(img, m.artTerm, m.artMode)
+		if err != nil {
+			return nil
+		}
+		return artLoadedMsg{albumID: albumID, rendered: rendered}
+	}
+}
+
 func (m nowPlayingModel) Update(msg tea.Msg) (nowPlayingModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case songSelectedMsg:
@@ -105,6 +184,10 @@ func (m nowPlayingModel) Update(msg tea.Msg) (nowPlayingModel, tea.Cmd) {
 	case trackStartedMsg:
 		m.duration = time.Duration(msg.song.Duration) * time.Second
 		m.err = nil
+		return m, m.loadArt(coverArtKey(msg.song))
+
+	case artLoadedMsg:
+		m.art = artworkState(msg)
 		return m, nil
 
 	case playErrMsg:
@@ -252,6 +335,10 @@ func (m nowPlayingModel) View() string {
 		m.volume,
 		m.progress.ViewAs(pct),
 	)
+
+	if m.art.rendered != "" {
+		body = m.art.rendered + "\n" + body
+	}
 
 	return borderStyle.Render(body)
 }

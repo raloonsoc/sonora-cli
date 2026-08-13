@@ -119,3 +119,36 @@ func (c *Client) CoverArtURL(id string, size int) string {
 	}
 	return c.buildURL("getCoverArt.view", v)
 }
+
+// GetCoverArt fetches the raw cover art bytes for id, unlike CoverArtURL
+// which only builds the request URL. Callers that need to decode and
+// render the image (internal/artwork) use this; StreamURL-style consumers
+// that hand the URL to another process (mpv) do not.
+func (c *Client) GetCoverArt(ctx context.Context, id string, size int) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.CoverArtURL(id, size), nil)
+	if err != nil {
+		return nil, fmt.Errorf("subsonic: build cover art request for %s: %w", id, err)
+	}
+	if h := c.auth.AuthHeader(); h != nil {
+		req.Header = h
+	}
+
+	res, err := c.hc.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("subsonic: get cover art %s: %w", id, err)
+	}
+	defer func() { _ = res.Body.Close() }() // response fully read below; close error is not actionable
+
+	if res.StatusCode == http.StatusNotFound {
+		return nil, ErrNotFound
+	}
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("subsonic: get cover art %s: unexpected status %s", id, res.Status)
+	}
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, fmt.Errorf("subsonic: read cover art %s: %w", id, err)
+	}
+	return body, nil
+}
