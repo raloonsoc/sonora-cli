@@ -56,32 +56,60 @@ func run() error {
 		}
 	}
 
+	// Switching profiles restarts the session (new server, new mpv
+	// process) rather than hot-swapping state inside one Bubble Tea
+	// program: runSession returns the next profile to load, if the user
+	// picked one from the in-TUI switcher, and this loop relaunches for it.
+	nextProfile := cfg.DefaultProfile
+	for {
+		switchTo, err := runSession(cfg, nextProfile)
+		if err != nil {
+			return err
+		}
+		if switchTo == "" {
+			return nil
+		}
+		nextProfile = switchTo
+	}
+}
+
+// runSession runs one full TUI session against profileName and returns the
+// profile the user switched to, or "" if they quit normally.
+func runSession(cfg *config.Config, profileName string) (string, error) {
+	cfg.DefaultProfile = profileName
 	prof, ok := cfg.ActiveProfile()
 	if !ok {
-		return fmt.Errorf("no profile named %q in config", cfg.DefaultProfile)
+		return "", fmt.Errorf("no profile named %q in config", profileName)
 	}
 
 	auth, err := buildAuth(cfg, prof)
 	if err != nil {
-		return fmt.Errorf("build auth: %w", err)
+		return "", fmt.Errorf("build auth: %w", err)
 	}
 	client := subsonic.NewClient(prof.URL, auth, nil)
 
 	ctrl, err := player.New()
 	if err != nil {
-		return fmt.Errorf("start player: %w", err)
+		return "", fmt.Errorf("start player: %w", err)
 	}
 	defer func() { _ = ctrl.Close() }() // graceful shutdown: kill mpv and remove the socket
 
 	if err := ctrl.SetVolume(cfg.Playback.Volume); err != nil {
-		return fmt.Errorf("set initial volume: %w", err)
+		return "", fmt.Errorf("set initial volume: %w", err)
+	}
+
+	profileNames := make([]string, 0, len(cfg.Profiles))
+	for name := range cfg.Profiles {
+		profileNames = append(profileNames, name)
 	}
 
 	app := ui.New(client, ctrl, ui.Options{
-		InitialVolume: cfg.Playback.Volume,
-		Term:          artwork.DetectTermType(),
-		ArtMode:       artwork.Mode(cfg.UI.Art),
-		LyricsEnabled: cfg.UI.Lyrics,
+		InitialVolume:  cfg.Playback.Volume,
+		Term:           artwork.DetectTermType(),
+		ArtMode:        artwork.Mode(cfg.UI.Art),
+		LyricsEnabled:  cfg.UI.Lyrics,
+		ProfileNames:   profileNames,
+		CurrentProfile: profileName,
 	})
 	p := tea.NewProgram(app)
 
@@ -95,11 +123,12 @@ func run() error {
 		p.Quit()
 	}()
 
-	if _, err := p.Run(); err != nil {
-		return fmt.Errorf("run tui: %w", err)
+	m, err := p.Run()
+	if err != nil {
+		return "", fmt.Errorf("run tui: %w", err)
 	}
 
-	return nil
+	return m.(ui.App).SwitchProfile, nil
 }
 
 // buildAuth constructs the subsonic.AuthProvider for prof, dispatching on

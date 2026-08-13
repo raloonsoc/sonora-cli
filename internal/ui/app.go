@@ -29,11 +29,12 @@ type App struct {
 	client *subsonic.Client
 	ctrl   *player.Controller
 
-	library    libraryModel
-	nowPlaying nowPlayingModel
-	search     searchModel
-	help       help.Model
-	keys       KeyMap
+	library       libraryModel
+	nowPlaying    nowPlayingModel
+	search        searchModel
+	profileSwitch profileSwitchModel
+	help          help.Model
+	keys          KeyMap
 
 	focus     pane
 	showHelp  bool
@@ -41,16 +42,23 @@ type App struct {
 	height    int
 	posCh     <-chan player.PositionUpdate
 	cancelPos context.CancelFunc
+
+	// SwitchProfile is set once App.Update quits in response to a
+	// profileSwitchModel selection; main reads it after tea.Program.Run
+	// returns to decide whether to relaunch with a different profile.
+	SwitchProfile string
 }
 
 // Options bundles the config-derived display preferences New needs, kept
 // as a group so adding a future preference doesn't grow New's parameter
 // list further.
 type Options struct {
-	InitialVolume int
-	Term          artwork.TermType // detected once at startup, cached for the session (SPECS §6.1)
-	ArtMode       artwork.Mode     // "auto" | "ascii" | "off"
-	LyricsEnabled bool
+	InitialVolume  int
+	Term           artwork.TermType // detected once at startup, cached for the session (SPECS §6.1)
+	ArtMode        artwork.Mode     // "auto" | "ascii" | "off"
+	LyricsEnabled  bool
+	ProfileNames   []string // all configured profiles, for the switch-profile view
+	CurrentProfile string
 }
 
 // New builds the root model. ctrl must already be running (see
@@ -63,16 +71,17 @@ type Options struct {
 func New(client *subsonic.Client, ctrl *player.Controller, opts Options) App {
 	ctx, cancel := context.WithCancel(context.Background())
 	return App{
-		client:     client,
-		ctrl:       ctrl,
-		library:    newLibraryModel(client),
-		nowPlaying: newNowPlayingModel(client, ctrl, opts.InitialVolume, opts.Term, opts.ArtMode, opts.LyricsEnabled),
-		search:     newSearchModel(client),
-		help:       help.New(),
-		keys:       DefaultKeyMap(),
-		focus:      paneLibrary,
-		posCh:      ctrl.PositionStream(ctx),
-		cancelPos:  cancel,
+		client:        client,
+		ctrl:          ctrl,
+		library:       newLibraryModel(client),
+		nowPlaying:    newNowPlayingModel(client, ctrl, opts.InitialVolume, opts.Term, opts.ArtMode, opts.LyricsEnabled),
+		search:        newSearchModel(client),
+		profileSwitch: newProfileSwitchModel(opts.ProfileNames, opts.CurrentProfile),
+		help:          help.New(),
+		keys:          DefaultKeyMap(),
+		focus:         paneLibrary,
+		posCh:         ctrl.PositionStream(ctx),
+		cancelPos:     cancel,
 	}
 }
 
@@ -112,6 +121,13 @@ func (m App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		if m.profileSwitch.active {
+			var cmd tea.Cmd
+			m.profileSwitch, cmd = m.profileSwitch.Update(msg)
+			m.SwitchProfile = m.profileSwitch.SwitchTo
+			return m, cmd
+		}
+
 		switch {
 		case key.Matches(msg, m.keys.Quit):
 			if m.cancelPos != nil {
@@ -126,6 +142,9 @@ func (m App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case key.Matches(msg, m.keys.Search):
 			m.search = m.search.Open()
+			return m, nil
+		case key.Matches(msg, m.keys.SwitchProfile):
+			m.profileSwitch = m.profileSwitch.Open()
 			return m, nil
 		}
 
@@ -172,6 +191,9 @@ func togglePane(p pane) pane {
 func (m App) View() string {
 	if m.search.active {
 		return m.search.View()
+	}
+	if m.profileSwitch.active {
+		return m.profileSwitch.View()
 	}
 
 	view := m.library.View() + "\n\n" + m.nowPlaying.View()

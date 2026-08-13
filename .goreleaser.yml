@@ -1,0 +1,73 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: sonora
+    main: ./cmd/sonora
+    binary: sonora
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: sonora
+    ids: [sonora]
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^test:"
+      - "^chore:"
+
+brews:
+  - name: sonora-cli
+    repository:
+      owner: raloonsoc
+      name: homebrew-tap
+    homepage: https://github.com/raloonsoc/sonora-cli
+    description: "Terminal music client for Sonora and any OpenSubsonic-compatible server"
+    license: MIT
+    install: |
+      bin.install "sonora"
+    dependencies:
+      - name: mpv
+      - name: ffmpeg
+    test: |
+      system "#{bin}/sonora --version"
+
+aurs:
+  - name: sonora-cli-bin
+    homepage: https://github.com/raloonsoc/sonora-cli
+    description: "Terminal music client for Sonora and any OpenSubsonic-compatible server"
+    maintainers:
+      - "Raúl Alonso"
+    license: MIT
+    private_key: "{{ .Env.AUR_KEY }}"
+    git_url: "ssh://aur@aur.archlinux.org/sonora-cli-bin.git"
+    depends:
+      - mpv
+      - ffmpeg
+    package: |-
+      install -Dm755 "./sonora" "${pkgdir}/usr/bin/sonora"
+
+release:
+  github:
+    owner: raloonsoc
+    name: sonora-cli

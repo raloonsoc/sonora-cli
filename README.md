@@ -4,9 +4,10 @@ A terminal music client for [Sonora](https://github.com/raloonsoc/sonora) and
 any OpenSubsonic-compatible server. Cover art, synced lyrics, and
 album-tinted UI — rendered directly in your terminal.
 
-> **Status: design phase.** This README describes the intended v1 as specified
-> in [SPECS.md](./SPECS.md); the implementation is tracked in
-> [ROADMAP.md](./ROADMAP.md). Nothing here is installable yet.
+> **Status: v1 implemented.** Every phase in [ROADMAP.md](./ROADMAP.md) is
+> built and tested against the design in [SPECS.md](./SPECS.md). No tagged
+> release has shipped yet, so the install methods below become live once
+> `v1.0.0` is tagged and its release workflow runs.
 
 ```
 ┌─ Now Playing ──────────────────────────────────────────────────────┐

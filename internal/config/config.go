@@ -71,18 +71,19 @@ func Load(path, profile string) (*Config, error) {
 		path:     path,
 	}
 
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return cfg, nil
+	if _, err := os.Stat(path); err == nil {
+		if err := decodeFile(path, cfg); err != nil {
+			return nil, fmt.Errorf("config: decode %s: %w", path, err)
+		}
+		cfg.path = path
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("config: stat %s: %w", path, err)
 	}
-
-	if err := decodeFile(path, cfg); err != nil {
-		return nil, fmt.Errorf("config: decode %s: %w", path, err)
-	}
-	cfg.path = path
 
 	if profile != "" {
 		cfg.DefaultProfile = profile
 	}
+	cfg.applyEnvOverrides()
 
 	return cfg, nil
 }
