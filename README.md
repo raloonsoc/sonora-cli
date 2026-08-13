@@ -29,9 +29,10 @@ large synced lyrics.
 - **Works with any OpenSubsonic server.** Built against the standard contract,
   so it talks to Sonora, Navidrome, Airsonic, and anything else that speaks
   the protocol.
-- **Real cover art in the terminal.** Native image rendering on Kitty, iTerm2,
-  and Sixel-capable terminals, with colored ASCII art as a fallback everywhere
-  else.
+- **Cover art in the terminal.** Rendered as colored ASCII art, chosen over
+  native graphics protocols (Kitty/iTerm2/Sixel) after they proved unreliable
+  in a TUI that repaints its whole frame on every playback tick — see
+  [Terminal support](#terminal-support).
 - **Synced lyrics.** Millisecond-timestamped lines that follow along with
   playback, with the active line highlighted.
 - **Album-derived accent color.** The UI tints itself to match the current
@@ -195,16 +196,20 @@ These work everywhere — browsing the library, or inside the lyrics view.
 
 ## Terminal support
 
-| Terminal | Cover art |
-|---|---|
-| Kitty | Native (Kitty graphics protocol) |
-| iTerm2 | Native (inline images) |
-| WezTerm, foot, Contour | Native (Sixel) |
-| Ghostty | Native (Kitty graphics protocol) |
-| Alacritty, GNOME Terminal, tmux | Colored ASCII art |
+Cover art renders as colored ASCII art everywhere — any 16-color-or-better
+terminal works, no graphics-protocol support required.
 
-Detection is automatic at startup. Force a mode with `art` in `[ui]` if the
-guess is wrong.
+Native graphics protocols (Kitty, iTerm2 inline images, Sixel) were tried
+early on but pulled: they place images as state that persists outside the
+normal text grid, separate from whatever the TUI's renderer believes is on
+screen. Repainting the whole frame on every ~500ms playback tick — which
+sonora-cli does, to drive the progress bar and lyrics highlight — desynced
+the two, causing the previous placement to linger undeleted instead of the
+new one replacing it in place. ASCII has no such out-of-band state, so it
+repaints exactly as reliably as the rest of the UI.
+
+`art = "auto" | "ascii" | "off"` in `[ui]` toggles art on/off; both non-"off"
+values currently render the same ASCII output.
 
 ## Accent color
 
