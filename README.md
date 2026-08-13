@@ -1,13 +1,11 @@
 # sonora-cli
 
+[![CI](https://github.com/raloonsoc/sonora-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/raloonsoc/sonora-cli/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+
 A terminal music client for [Sonora](https://github.com/raloonsoc/sonora) and
 any OpenSubsonic-compatible server. Cover art, synced lyrics, and
 album-tinted UI — rendered directly in your terminal.
-
-> **Status: v1 implemented.** Every phase in [ROADMAP.md](./ROADMAP.md) is
-> built and tested against the design in [SPECS.md](./SPECS.md). No tagged
-> release has shipped yet, so the install methods below become live once
-> `v1.0.0` is tagged and its release workflow runs.
 
 ```
 ┌─ Now Playing ──────────────────────────────────────────────────────┐
@@ -71,7 +69,7 @@ brew install raloonsoc/tap/sonora-cli
 ### Arch (AUR)
 
 ```bash
-yay -S sonora-cli
+yay -S sonora-cli-bin
 ```
 
 ### Go
@@ -123,7 +121,7 @@ lyrics = true
 volume = 80
 ```
 
-Switch profiles with `--profile`:
+Switch profiles with `--profile`, or press `P` inside the app:
 
 ```bash
 sonora --profile vps
@@ -137,8 +135,10 @@ sonora --profile vps
 | `--config <path>` | Override the config file location |
 | `--version` | Print version and exit |
 
-Every setting can also be overridden with `SONORA_CLI_*` environment
-variables.
+Every setting can also be overridden with an environment variable:
+`SONORA_CLI_URL`, `SONORA_CLI_USERNAME`, `SONORA_CLI_PASSWORD`,
+`SONORA_CLI_AUTH`, `SONORA_CLI_DEFAULT_PROFILE`, `SONORA_CLI_UI_ART`,
+`SONORA_CLI_UI_LYRICS`, `SONORA_CLI_PLAYBACK_VOLUME`.
 
 ### Password storage
 
@@ -167,6 +167,7 @@ Press `?` at any time for the in-app help.
 | `q` | Quit |
 | `?` | Toggle help |
 | `/` | Search |
+| `P` | Switch profile |
 | `esc` | Back |
 | `tab` | Cycle panes |
 
@@ -238,8 +239,7 @@ position is polled to drive the progress bar and the lyrics highlight.
 
 ## Contributing
 
-The build order in [ROADMAP.md](./ROADMAP.md) is the best map of what's in
-flight. Issues and PRs welcome.
+Issues and PRs are welcome. To build from source:
 
 ```bash
 git clone https://github.com/raloonsoc/sonora-cli
@@ -248,6 +248,9 @@ make build
 make test
 ```
 
+`make lint` runs `gofmt`, `go vet`, and `golangci-lint`; CI enforces all
+three on every pull request.
+
 ## License
 
-See [LICENSE](./LICENSE).
+[MIT](./LICENSE)
